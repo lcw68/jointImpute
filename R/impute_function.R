@@ -1,0 +1,135 @@
+
+
+#' Identifying function deciding the false zero part
+#'
+#'
+#'
+#' @param meta meta data/ covariates matrix
+#' @param value outcome value we used
+#' @param ref reference value for imputation
+#' @param mode two values \code{dna} or \code{rna}
+#' @param reads reads for microbiome data
+#' @param is_identify indiator whether we need identify step
+#'
+#'
+#' @return A vector for deciding false zero
+#'
+#'
+#'
+#'
+#'
+#' @noRd
+#'
+#'
+#'
+model_fit <- function(meta, value, ref, mode, reads, is_identify){
+  if(is_identify){
+    print("identify")
+    df_all <- meta
+
+    if(any(apply(df_all,2,function(x){length(table(x))})==1))
+    {
+      df_all = df_all[,-which(apply(df_all,2,function(x){length(table(x))})==1)]
+    }
+    df_all$value <- value
+    df_all$ref <- as.factor(ref!=0)
+    df_all$reads = reads
+    pos_prob <- rep(0, length(value))
+    if(mode=='dna'){
+      pos_prob[which(value==0&ref!=0)] <- 1
+      df <- subset(filter(df_all, ref==FALSE), select=-ref)
+      filter_idx <- which(df_all$ref==FALSE)
+    }
+    else{
+      df <- subset(filter(df_all, ref==TRUE), select=-ref)
+      filter_idx <- which(df_all$ref==TRUE)
+    }
+
+    # if(length(levels(droplevels(df[,"batch"])))==1)
+    #   df <- subset(df, select=-batch)
+    # if(length(levels(droplevels(df[,"cariesfree"])))==1)
+    #   df <- subset(df, select=-cariesfree)
+    #
+    outlier_bound <- min(mean(df_all$value)+3*sd(df_all$value), mean(df$value)+3*sd(df$value))
+    df[which(df$value>outlier_bound), 'value'] <- round(outlier_bound)
+    if(length(levels(as.factor(df[, 'value'])))>1 & sum(value[filter_idx]==0)>1){
+      model_zinb <- pscl::zeroinfl(value~.-reads|reads, data=df, dist='negbin')
+      model_nb <- glm.nb(value~.-reads, data=df, control=glm.control(maxit=30))
+      model_p <- glm(value~.-reads, data=df, family=poisson)
+      ##likelihood ratio test
+      p1 <- as.numeric(1 - pchisq(2*(logLik(model_zinb)-logLik(model_nb)), df=2))
+      p2 <- as.numeric(1 - pchisq(2*(logLik(model_zinb)-logLik(model_p)), df=3))
+      p <- max(p1, p2)
+      if(p<0.05){
+        pi <- predict(model_zinb, type = "zero")
+        mu <- predict(model_zinb, type = "count")
+        pos_prob[filter_idx] <- ifelse(value[filter_idx]==0, pi/(pi+(1-pi)*exp(-mu)), 0)
+      }
+    }
+  }
+  else{
+    print("no identify")
+    pos_prob <- rep(0, length(value))
+    pos_prob[which(value==0)] = 1
+  }
+  return(pos_prob)
+}
+
+#' JointImpute: joint imputation method for microbiome data using DNA and RNA iteratively
+#'
+#' The function proposed an imputation method which output the imputed data as DNA and RNA level at the same time.
+#'
+#' @param otu_dna A m*n data frame/ matrix that represents OTU count table for DNA
+#' @param otu_rna A m*n data frame/ matrix that represents OTU count table for RNA
+#' @param covariates_DNA A n*p data frame/ matrix corresponding to covariates matrix/ meta data for DNA
+#' @param covariates_RNA A n*p data frame/ matrix corresponding to covariates matrix/ meta data for RNA
+#' @param is_identify indicator of whether we need identify step
+#' @param epochs Iteration times for imputation
+#' @param coef proportional constant for normalizing
+#'
+#'
+#' @return A list of imputed DNA and RNA matrix
+#'
+#' @examples
+#'
+#' covariates_DNA  <- data.frame(batch=factor(meta$batch.DNA), age=meta$age_mos, cariesfree=meta$cariesfree, reads=meta$reads.DNA/1e6)
+#' covariates_RNA = data.frame(batch=factor(meta$batch.RNA),age=meta$age_mos,cariesfree=meta$cariesfree,reads = meta$reads.RNA/1e6)
+#' otu_dna= otu[,,1]
+#' otu_rna= otu[,,2]
+#' otu.imp = impute(otu_dna, otu_rna, covariates_DNA, covariates_RNA,is_identify = TRUE,epochs = 1)
+#'
+#'
+#'
+#' @export
+#'
+#'
+#'
+impute <- function(otu_dna, otu_rna, covariates_DNA, covariates_RNA, is_identify, epochs=1, coef=1e4){
+  filter_idx <- which(rowSums(otu_dna!=0)>15 & rowSums(otu_dna==0)>5 &
+                        rowSums(otu_rna!=0)>5 & rowSums(otu_rna==0)>5)
+  otu_dna_filtered <- otu_dna[filter_idx,]
+  otu_rna_filtered <- otu_rna[filter_idx,]
+  old_impute_dna <- otu_dna_filtered
+  old_impute_rna <- otu_rna_filtered
+  cnt <- 1
+  while(cnt<=epochs){
+    #print(cnt)
+
+    #print("imputing DNA")
+    impute_dna <- impute_step(old_impute_dna, covariates_DNA, old_impute_rna, "dna", is_identify, coef)
+
+    #print("imputing RNA")
+    impute_rna <- impute_step(old_impute_rna, covariates_RNA, impute_dna, "rna", is_identify, coef)
+
+    if(all(old_impute_dna==impute_dna)&all(old_impute_rna==impute_rna)){
+      break
+    }
+
+    old_impute_dna <- impute_dna
+    old_impute_rna <- impute_rna
+    cnt <- cnt+1
+  }
+  otu_dna[filter_idx,] <- impute_dna
+  otu_rna[filter_idx,] <- impute_rna
+  return(list(otu_dna, otu_rna))
+}
