@@ -1,3 +1,53 @@
+#' Discriticizing the OTU table
+#'
+#'
+#'
+#' @param otu_table OTU table
+#' @param reads reads in meta data
+#'
+#'
+#' @return A transposed matrix with normalized OTU
+#'
+#' @noRd
+#'
+#'
+#'
+discriticize <- function(otu_table, reads){
+  count_otu <- sapply(1:nrow(otu_table), function(i){
+    normalized_otu <- otu_table[i,]/reads
+    epsilon <- min(normalized_otu[normalized_otu>0])
+    normalized_otu <- round(normalized_otu/(2*epsilon))
+    return(normalized_otu)
+  })
+  count_otu <- t(count_otu)
+  rownames(count_otu) <- rownames(otu_table)
+  return(count_otu)
+}
+
+#' Log Transform the OTU table
+#'
+#'
+#'
+#' @param otu_table OTU table
+#' @param mode steps we want to conduct
+#' @param coef proportional constant
+#'
+#'
+#' @return Count or Continuous number of log transformed OTU table
+#'
+#' @noRd
+#'
+#'
+#'
+normalize_otu<- function(otu_table, mode, coef=1e4){
+  otu_table <- otu_table/colSums(otu_table)
+  if (mode=='identify')
+    otu_table <- ceiling(log(otu_table*coef+1))
+  else
+    otu_table <- log(otu_table*coef+1)
+  return(otu_table)
+}
+
 
 
 #' Identifying function deciding the false zero part
@@ -15,7 +65,8 @@
 #' @return A vector for deciding false zero
 #'
 #'
-#'
+#' @importFrom pscl zeroinfl
+#' @importFrom MASS glm.nb
 #'
 #'
 #' @noRd
@@ -54,7 +105,7 @@ model_fit <- function(meta, value, ref, mode, reads, is_identify){
     df[which(df$value>outlier_bound), 'value'] <- round(outlier_bound)
     if(length(levels(as.factor(df[, 'value'])))>1 & sum(value[filter_idx]==0)>1){
       model_zinb <- pscl::zeroinfl(value~.-reads|reads, data=df, dist='negbin')
-      model_nb <- glm.nb(value~.-reads, data=df, control=glm.control(maxit=30))
+      model_nb <- MASS::glm.nb(value~.-reads, data=df, control=glm.control(maxit=30))
       model_p <- glm(value~.-reads, data=df, family=poisson)
       ##likelihood ratio test
       p1 <- as.numeric(1 - pchisq(2*(logLik(model_zinb)-logLik(model_nb)), df=2))
@@ -74,6 +125,10 @@ model_fit <- function(meta, value, ref, mode, reads, is_identify){
   }
   return(pos_prob)
 }
+
+
+
+
 
 #' JointImpute: joint imputation method for microbiome data using DNA and RNA iteratively
 #'
@@ -96,7 +151,7 @@ model_fit <- function(meta, value, ref, mode, reads, is_identify){
 #' covariates_RNA = data.frame(batch=factor(meta$batch.RNA),age=meta$age_mos,cariesfree=meta$cariesfree,reads = meta$reads.RNA/1e6)
 #' otu_dna= otu[,,1]
 #' otu_rna= otu[,,2]
-#' otu.imp = impute(otu_dna, otu_rna, covariates_DNA, covariates_RNA,is_identify = TRUE,epochs = 1)
+#' otu.imp = jointimpute(otu_dna, otu_rna, covariates_DNA, covariates_RNA,is_identify = TRUE,epochs = 1)
 #'
 #'
 #'
@@ -104,7 +159,7 @@ model_fit <- function(meta, value, ref, mode, reads, is_identify){
 #'
 #'
 #'
-impute <- function(otu_dna, otu_rna, covariates_DNA, covariates_RNA, is_identify, epochs=1, coef=1e4){
+jointimpute <- function(otu_dna, otu_rna, covariates_DNA, covariates_RNA, is_identify, epochs=1, coef=1e4){
   filter_idx <- which(rowSums(otu_dna!=0)>15 & rowSums(otu_dna==0)>5 &
                         rowSums(otu_rna!=0)>5 & rowSums(otu_rna==0)>5)
   otu_dna_filtered <- otu_dna[filter_idx,]
