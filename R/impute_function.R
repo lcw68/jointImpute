@@ -49,7 +49,6 @@ normalize_otu<- function(otu_table, mode, coef=1e4){
 }
 
 
-
 #' Identifying function deciding the false zero part
 #'
 #'
@@ -127,8 +126,59 @@ model_fit <- function(meta, value, ref, mode, reads, is_identify){
 }
 
 
+#' Pick out the DNA selected to be imputed
+#'
+#'
+#'
+#' @param dna_vec DNA we aims to select
+#' @param rna_vec corresponding RNA as reference
+#' @param meta_dna meta data for DNA
+#' @param i genera or species number
+#' @param is_identify indicator of whether we need identification step
+#' @param thres threshold for determining imputation set
+#'
+#'
+#' @return Count or Continuous number of log transformed OTU table
+#'
+#' @noRd
+#'
+#'
+#'
+pick_out_dna <- function(dna_vec, rna_vec, meta_dna, i, is_identify, thres = 0.5){
+  prob <- model_fit(meta_dna, dna_vec, rna_vec, 'dna', is_identify)
+  impute_set <- which(prob>thres)
+  confidence_set <- setdiff(1:length(dna_vec), impute_set)
+  impute_set = data.frame(sample=impute_set, taxa=rep(i, length(impute_set)))
+  confidence_set = data.frame(sample=confidence_set, taxa=rep(i, length(confidence_set)))
+  return(list(impute_set, confidence_set))
+}
 
-
+#' Pick out the RNA selected to be imputed
+#'
+#'
+#'
+#' @param rna_vec RNA we aims to select
+#' @param dna_vec corresponding DNA as reference
+#' @param meta_dna meta data for RNA
+#' @param i genera or species number
+#' @param is_identify indicator of whether we need identification step
+#' @param thres threshold for determining imputation set
+#'
+#'
+#' @return Count or Continuous number of log transformed OTU table
+#'
+#' @noRd
+#'
+#'
+#'
+pick_out_rna <- function(rna_vec, dna_vec, meta_rna, i, is_identify){
+  prob <- model_fit(meta_rna, rna_vec, dna_vec, 'rna', is_identify)
+  impute_set <- which(prob>0.5)
+  confidence_set <- setdiff(1:length(rna_vec), impute_set)
+  impute_set = data.frame(sample=impute_set, taxa=rep(i, length(impute_set)))
+  confidence_set = data.frame(sample=confidence_set, taxa=rep(i, length(confidence_set)))
+  return(list(impute_set, confidence_set))
+}
 
 #' JointImpute: joint imputation method for microbiome data using DNA and RNA iteratively
 #'
