@@ -138,7 +138,7 @@ model_fit <- function(meta, value, ref, mode, reads, is_identify){
 #' @param thres threshold for determining imputation set
 #'
 #'
-#' @return Count or Continuous number of log transformed OTU table
+#' @return List of imputed vector and confidence vector
 #'
 #' @noRd
 #'
@@ -165,7 +165,7 @@ pick_out_dna <- function(dna_vec, rna_vec, meta_dna, i, is_identify, thres = 0.5
 #' @param thres threshold for determining imputation set
 #'
 #'
-#' @return Count or Continuous number of log transformed OTU table
+#' @return List of imputed vector and confidence vector
 #'
 #' @noRd
 #'
@@ -179,6 +179,162 @@ pick_out_rna <- function(rna_vec, dna_vec, meta_rna, i, is_identify){
   confidence_set = data.frame(sample=confidence_set, taxa=rep(i, length(confidence_set)))
   return(list(impute_set, confidence_set))
 }
+
+#' Imputation set determination
+#'
+#'
+#'
+#' @param otu_impute OTU table we aims to impute
+#' @param meta_data meta data
+#' @param otu_ref OTU table as reference
+#' @param mode DNA or RNA we aims to impute
+#' @param is_identify indicator of whether we need identification step
+#'
+#'
+#' @return List of imputed vector and confidence vector
+#'
+#' @noRd
+#'
+#'
+#'
+identify_step <- function(otu_impute, meta_data, otu_ref, mode, is_identify){
+  if (mode=='dna')
+    results <- lapply(1:nrow(otu_impute), FUN = function(i){
+      pick_out_dna(otu_impute[i,], otu_ref[i,], meta_data, i, is_identify)
+    })
+  else
+    results <- lapply(1:nrow(otu_impute), FUN = function(i){
+      pick_out_rna(otu_impute[i,], otu_ref[i,], meta_data, i, is_identify)
+    })
+  impute_set <- c()
+  confidence_set <- c()
+  for (i in 1:length(results)){
+    impute_set <- rbind(impute_set, results[[i]][[1]])
+    confidence_set <- rbind(confidence_set, results[[i]][[2]])
+  }
+  return(list(impute_set, confidence_set))
+}
+
+
+#' Predict meta information
+#'
+#'
+#'
+#' @param otu_impute OTU table we aims to impute
+#' @param meta_data meta data
+#' @param otu_ref OTU table as reference
+#' @param mode DNA or RNA we aims to impute
+#' @param is_identify indicator of whether we need identification step
+#'
+#'
+#' @return List of imputed vector and confidence vector
+#'
+#' @noRd
+#'
+#'
+#'
+predict_meta <- function(otu_impute, confidence_set, meta){
+  otu_smooth <- sapply(1:dim(otu_impute)[1], function(i){
+    y <- otu_impute[i, ]
+    df <- meta #data.frame(value=y, batch=meta$batch, age=meta$age, reads=meta$reads, cariesfree=meta$cariesfree)
+    training_set <- unlist(subset(confidence_set, taxa==i, select=sample))
+
+    ##remove one-level factor
+    delete_col <- c()
+    for(j in 1:dim(df)[2]){
+      if (is.factor(df[,j])){
+        level_num <- nlevels(droplevels(df[training_set, j]))
+        if (level_num==1)
+          delete_col <- c(delete_col, j)
+      }
+    }
+    if(!is.null(delete_col))
+      df <- df[, -delete_col]
+
+    model <- lm(get(colnames(df)[1])~., df[training_set,])
+    y_hat <- predict(model, df)
+    return(y_hat)
+  })
+}
+
+
+#' Predict each sample's imputation result
+#'
+#'
+#' @param i ith samples we aims to impute
+#' @param otu_impute OTU table we aims to impute
+#' @param impute_set index for imputation set (used for prediction)
+#' @param confidence_set index for reference et (used for training)
+#'
+#' @return cell-wise prediction result
+#'
+#' @noRd
+#'
+#'
+#'
+predict_cellwise <- function(i, otu_impute, impute_set, confidence_set){
+  training_set <- unlist(subset(confidence_set, sample==i, select=taxa))
+  testing_set <- unlist(subset(impute_set, sample==i, select=taxa))
+  if(length(testing_set)<3 | length(training_set)<3){
+    return(otu_impute[,i])
+  }
+  else{
+    X <- otu_impute[, -i]
+    y <- otu_impute[, i]
+
+    X_train <- X[training_set, ]
+    X_test <- X[testing_set, ]
+    y_train <- y[training_set]
+    cv.result <- cv.glmnet(x=X_train, y=y_train, family="gaussian", intercept=TRUE, nfolds=5 )
+    mse.min <- cv.result$cvm[cv.result$lambda == cv.result$lambda.min]
+    y_test <- predict(cv.result, X_test, s='lambda.min')
+    ###### making the result more robust #####
+    thred = mean(y_train) + 3*sd(y_train)
+    y_test[which(y_test>thred)] <- thred
+    ###### making the result more robust #####
+    y[testing_set] <- y_test
+    return(y)
+  }
+}
+
+#' Predict each genera/species' imputation result
+#'
+#'
+#' @param i ith genera/specie we aims to impute
+#' @param otu_impute OTU table we aims to impute
+#' @param impute_set index for imputation set (used for prediction)
+#' @param confidence_set index for reference et (used for training)
+#'
+#' @return gene-wise prediction result
+#'
+#' @noRd
+#'
+#'
+#'
+predict_genewise <- function(i, otu_impute, impute_set, confidence_set){
+  training_set <- unlist(subset(confidence_set, taxa==i, select=sample))
+  testing_set <- unlist(subset(impute_set, taxa==i, select=sample))
+  if(length(testing_set)<3 | length(training_set)<3){
+    return(otu_impute[i,])
+  }
+  else{
+    X <- otu_impute[-i,]
+    X <- data.matrix(X)
+    y <- otu_impute[i,]
+
+    X_train <- t(X[, training_set])
+    X_test <- t(X[, testing_set])
+    y_train <- y[training_set]
+    cv.result <- cv.glmnet(x = X_train, y = y_train, family = "gaussian",
+                           intercept = TRUE, nfolds=5)
+    y_test <- predict(cv.result, X_test)
+    y_test[which(y_test<0)] <- 0
+    y[testing_set] <- y_test
+    return(y)
+  }
+}
+
+
 
 #' JointImpute: joint imputation method for microbiome data using DNA and RNA iteratively
 #'
