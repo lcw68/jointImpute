@@ -87,10 +87,6 @@ model_fit <- function(meta, value, ref, mode, reads = NULL, is_identify){
         reads = df_all[,which(grepl("read",colnames(df_all))==TRUE)[1]]
       }
     }
-    if(any(apply(df_all,2,function(x){length(table(x))})==1))
-    {
-      df_all = df_all[,-which(apply(df_all,2,function(x){length(table(x))})==1)]
-    }
     df_all$value <- value
     df_all$ref <- as.factor(ref!=0)
     df_all$reads = reads
@@ -105,6 +101,10 @@ model_fit <- function(meta, value, ref, mode, reads = NULL, is_identify){
       filter_idx <- which(df_all$ref==TRUE)
     }
 
+    if(any(apply(df,2,function(x){length(table(x))})==1))
+    {
+      df = df[,-which(apply(df,2,function(x){length(table(x))})==1)]
+    }
     # if(length(levels(droplevels(df[,"batch"])))==1)
     #   df <- subset(df, select=-batch)
     # if(length(levels(droplevels(df[,"cariesfree"])))==1)
@@ -155,7 +155,7 @@ model_fit <- function(meta, value, ref, mode, reads = NULL, is_identify){
 #'
 #'
 pick_out_dna <- function(dna_vec, rna_vec, meta_dna, i, is_identify, thres = 0.5){
-  prob <- model_fit(meta_dna, dna_vec, rna_vec, 'dna', is_identify)
+  prob <- model_fit(meta_dna, dna_vec, rna_vec, 'dna', is_identify = is_identify)
   impute_set <- which(prob>thres)
   confidence_set <- setdiff(1:length(dna_vec), impute_set)
   impute_set = data.frame(sample=impute_set, taxa=rep(i, length(impute_set)))
@@ -182,7 +182,7 @@ pick_out_dna <- function(dna_vec, rna_vec, meta_dna, i, is_identify, thres = 0.5
 #'
 #'
 pick_out_rna <- function(rna_vec, dna_vec, meta_rna, i, is_identify){
-  prob <- model_fit(meta_rna, rna_vec, dna_vec, 'rna', is_identify)
+  prob <- model_fit(meta_rna, rna_vec, dna_vec, 'rna', is_identify = is_identify)
   impute_set <- which(prob>0.5)
   confidence_set <- setdiff(1:length(rna_vec), impute_set)
   impute_set = data.frame(sample=impute_set, taxa=rep(i, length(impute_set)))
@@ -277,6 +277,7 @@ predict_meta <- function(otu_impute, confidence_set, meta){
 #' @param confidence_set index for reference et (used for training)
 #'
 #' @return cell-wise prediction result
+#' @importFrom glmnet cv.glmnet
 #'
 #' @noRd
 #'
@@ -295,7 +296,7 @@ predict_cellwise <- function(i, otu_impute, impute_set, confidence_set){
     X_train <- X[training_set, ]
     X_test <- X[testing_set, ]
     y_train <- y[training_set]
-    cv.result <- cv.glmnet(x=X_train, y=y_train, family="gaussian", intercept=TRUE, nfolds=5 )
+    cv.result <- glmnet::cv.glmnet(x=X_train, y=y_train, family="gaussian", intercept=TRUE, nfolds=5 )
     mse.min <- cv.result$cvm[cv.result$lambda == cv.result$lambda.min]
     y_test <- predict(cv.result, X_test, s='lambda.min')
     ###### making the result more robust #####
@@ -451,10 +452,10 @@ jointimpute <- function(otu_dna, otu_rna, covariates_DNA, covariates_RNA, is_ide
     #print(cnt)
 
     print("imputing DNA")
-    impute_dna <- impute_step(old_impute_dna, covariates_DNA, old_impute_rna, "dna", is_identify, coef)
+    impute_dna <- impute_step(old_impute_dna, covariates_DNA, reads = NULL, old_impute_rna, "dna", is_identify, coef)
 
     print("imputing RNA")
-    impute_rna <- impute_step(old_impute_rna, covariates_RNA, impute_dna, "rna", is_identify, coef)
+    impute_rna <- impute_step(old_impute_rna, covariates_RNA, reads = NULL, impute_dna, "rna", is_identify, coef)
 
     if(all(old_impute_dna==impute_dna)&all(old_impute_rna==impute_rna)){
       break
