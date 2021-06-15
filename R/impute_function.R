@@ -72,11 +72,21 @@ normalize_otu<- function(otu_table, mode, coef=1e4){
 #'
 #'
 #'
-model_fit <- function(meta, value, ref, mode, reads, is_identify){
+model_fit <- function(meta, value, ref, mode, reads = NULL, is_identify){
   if(is_identify){
     print("identify")
     df_all <- meta
-
+    if(is.null(reads))
+    {
+      if(any(grepl("read",colnames(df_all)))==FALSE)
+      {
+        stop("reads information needed in meta data")
+      }
+      else
+      {
+        reads = df_all[,which(grepl("read",colnames(df_all))==TRUE)[1]]
+      }
+    }
     if(any(apply(df_all,2,function(x){length(table(x))})==1))
     {
       df_all = df_all[,-which(apply(df_all,2,function(x){length(table(x))})==1)]
@@ -87,11 +97,11 @@ model_fit <- function(meta, value, ref, mode, reads, is_identify){
     pos_prob <- rep(0, length(value))
     if(mode=='dna'){
       pos_prob[which(value==0&ref!=0)] <- 1
-      df <- subset(filter(df_all, ref==FALSE), select=-ref)
+      df <- subset(df_all, ref==FALSE, select=-ref)
       filter_idx <- which(df_all$ref==FALSE)
     }
     else{
-      df <- subset(filter(df_all, ref==TRUE), select=-ref)
+      df <- subset(df_all, ref==TRUE, select=-ref)
       filter_idx <- which(df_all$ref==TRUE)
     }
 
@@ -335,6 +345,70 @@ predict_genewise <- function(i, otu_impute, impute_set, confidence_set){
 }
 
 
+#' Imputation conduction on each step
+#'
+#'
+#' @param otu_impute m*n OTU table we aims to impute
+#' @param meta_data n*p data frame which represents meta data
+#' @param reads by default \code{reads=NULL} if \code{meta_data} contains the information of reads; otherwise a numeric vector of reads for each sample should be given
+#' @param otu_ref m*n OTU table we use as reference
+#' @param mode DNA or RNA we aims to impute
+#' @param is_identify indicator of whether we need identification step
+#' @param coef proportional constant
+#'
+#' @return m*n imputed OTU table
+#'
+#' @noRd
+#'
+#'
+#'
+impute_step <- function(otu_impute, meta_data, reads = NULL, otu_ref, mode, is_identify, coef=1e4){
+  ##normalized by reads
+  if(is.null(reads))
+  {
+    if(any(grepl("read",colnames(meta_data)))==FALSE)
+    {
+      stop("reads information needed in meta data")
+    }
+    else
+    {
+      reads = meta_data[,which(grepl("read",colnames(meta_data))==TRUE)[1]]
+    }
+  }
+
+  otu_impute_identify <- discriticize(otu_impute, reads)
+  otu_ref_identify <- discriticize(otu_ref, reads)
+
+  identify_list <- identify_step(otu_impute_identify, meta_data, otu_ref_identify, mode, is_identify)
+  impute_set <- identify_list[[1]]
+  confidence_set <- identify_list[[2]]
+
+  otu_impute_predict <- normalize_otu(otu_impute, "predict", coef)
+  otu_ref_predict <- normalize_otu(otu_ref, "predict", coef)
+  smooth_value <- t(predict_meta(otu_impute_predict, confidence_set, meta_data))
+  rownames(smooth_value) <- rownames(otu_impute)
+
+  confidence_matrix <- matrix(0, dim(otu_impute_predict)[1], dim(otu_impute_predict)[2])
+  for(i in 1:dim(confidence_set)[1])
+    confidence_matrix[confidence_set[i,]$taxa, confidence_set[i,]$sample] <- 1
+
+  otu_impute_predict[which(confidence_matrix==1)] <- otu_impute_predict[which(confidence_matrix==1)]-smooth_value[which(confidence_matrix==1)]
+
+  otu_impute_predict <- sapply(1:ncol(otu_impute_predict), function(i){return(
+    predict_cellwise(i, otu_impute_predict, impute_set, confidence_set))
+  })
+
+  # otu_impute_predict <- t(sapply(1:nrow(otu_impute_predict), function(i){
+  #   predict_genewise(i, otu_impute_predict, impute_set, confidence_set)
+  # }))
+
+  otu_impute_predict <- otu_impute_predict + smooth_value
+  otu_impute_predict[which(otu_impute_predict<0)] <- 0
+  new_otu_impute <- (exp(otu_impute_predict)-1)*colSums(otu_impute)/coef
+  return(new_otu_impute)
+}
+
+
 
 #' JointImpute: joint imputation method for microbiome data using DNA and RNA iteratively
 #'
@@ -376,10 +450,10 @@ jointimpute <- function(otu_dna, otu_rna, covariates_DNA, covariates_RNA, is_ide
   while(cnt<=epochs){
     #print(cnt)
 
-    #print("imputing DNA")
+    print("imputing DNA")
     impute_dna <- impute_step(old_impute_dna, covariates_DNA, old_impute_rna, "dna", is_identify, coef)
 
-    #print("imputing RNA")
+    print("imputing RNA")
     impute_rna <- impute_step(old_impute_rna, covariates_RNA, impute_dna, "rna", is_identify, coef)
 
     if(all(old_impute_dna==impute_dna)&all(old_impute_rna==impute_rna)){
