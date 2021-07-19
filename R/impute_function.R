@@ -113,7 +113,7 @@ model_fit <- function(meta, value, ref, mode, reads = NULL, is_identify){
     outlier_bound <- min(mean(df_all$value)+3*sd(df_all$value), mean(df$value)+3*sd(df$value))
     df[which(df$value>outlier_bound), 'value'] <- round(outlier_bound)
     if(length(levels(as.factor(df[, 'value'])))>1 & sum(value[filter_idx]==0)>1){
-      model_zinb <- pscl::zeroinfl(value~.-reads|reads, data=df, dist='negbin')
+      model_zinb <- pscl::zeroinfl(value~.-reads|reads, data=df, dist='negbin') ###change to more general (no covariates)
       model_nb <- MASS::glm.nb(value~.-reads, data=df, control=glm.control(maxit=30))
       model_p <- glm(value~.-reads, data=df, family=poisson)
       ##likelihood ratio test
@@ -136,7 +136,7 @@ model_fit <- function(meta, value, ref, mode, reads = NULL, is_identify){
 }
 
 
-#' Pick out the DNA selected to be imputed
+#' Pick out the DNA selected to be imputed (False zero)
 #'
 #'
 #'
@@ -163,7 +163,7 @@ pick_out_dna <- function(dna_vec, rna_vec, meta_dna, i, is_identify, thres = 0.5
   return(list(impute_set, confidence_set))
 }
 
-#' Pick out the RNA selected to be imputed
+#' Pick out the RNA selected to be imputed (False zero)
 #'
 #'
 #'

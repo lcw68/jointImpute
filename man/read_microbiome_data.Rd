@@ -7,7 +7,7 @@
 read_microbiome_data(file, eliminate_taxa_threshold = 0)
 }
 \arguments{
-\item{file}{the name of the file which the data are to be read from.}
+\item{file}{the name of the file which the data are to be read from. Data should be in list format with three dimensions: otu, taxa and meta.}
 
 \item{eliminate_taxa_threshold}{threshold for deciding unexpressed level to be elminated}
 }

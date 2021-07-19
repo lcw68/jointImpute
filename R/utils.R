@@ -2,7 +2,7 @@
 #'
 #' Reads a file in list format and eliminate invalid taxa and samples (preprocessing)
 #'
-#' @param file the name of the file which the data are to be read from.
+#' @param file the name of the file which the data are to be read from. Data should be in list format with three dimensions: otu, taxa and meta.
 #' @param eliminate_taxa_threshold threshold for deciding unexpressed level to be elminated
 #'
 #'
@@ -51,16 +51,15 @@ read_microbiome_data <- function(file, eliminate_taxa_threshold=0.0){
 #' @return A list of Density plot and double zero proportion
 #'
 #' @examples
-#'
-#'
 #' humann_2 <- read_microbiome_data("data.bactRPK.marginal.DRNA.ZOE2.rds",eliminate_taxa_threshold=0.1)
-#' plot_ratio_density(humann_2[[1]],human_2[[2]])
+#' plot_ratio_density(humann_2[[1]],humann_2[[2]])
 #'
-#' @importFrom ggplot2 ggplot geom_density scale_fill_discrete scale_color_discrete labs
+#@importFrom ggplot2 ggplot aes after_stat geom_density scale_fill_discrete scale_color_discrete labs
 #' @export
 #'
 plot_ratio_density <- function(otu_dna, otu_rna, with_zero=TRUE){
 
+  require("ggplot2")
   epsilon_dna <- min(otu_dna[which(otu_dna>0)])
   epsilon_rna <- min(otu_rna[which(otu_rna>0)])
 
@@ -79,7 +78,7 @@ plot_ratio_density <- function(otu_dna, otu_rna, with_zero=TRUE){
 
   df <- data.frame(ratio, class=class_fac)
   if(with_zero)
-    density_plot <- ggplot(df, aes(ratio, after_stat(count), fill=class, color=class)) + geom_density(
+    density_plot <- ggplot(df, ggplot2::aes(ratio, after_stat(count), fill=class, color=class)) + geom_density(
       adjust=1/10, alpha=0.5) + scale_fill_discrete(name = "class (DNA,RNA)") +  scale_color_discrete(name = "class (DNA,RNA)")+labs(x="log-ratio", y='count', title='log-ratio plot with (0,0) situation')
   else
     density_plot <- ggplot(subset(df, class %in% c("(+,0)","(0,+)","(+,+)")), aes(ratio, after_stat(count), fill=class, color=class)) + geom_density(

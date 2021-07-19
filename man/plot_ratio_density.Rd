@@ -20,9 +20,7 @@ A list of Density plot and double zero proportion
 Plot the log ratio of four peak group
 }
 \examples{
-
-
 humann_2 <- read_microbiome_data("data.bactRPK.marginal.DRNA.ZOE2.rds",eliminate_taxa_threshold=0.1)
-plot_ratio_density(humann_2[[1]],human_2[[2]])
+plot_ratio_density(humann_2[[1]],humann_2[[2]])
 
 }
